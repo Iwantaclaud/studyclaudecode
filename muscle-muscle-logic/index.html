@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>머슬머슬 로직</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Gothic+A1:wght@400;700;900&display=swap">
+
+<style>
+  :root{
+    --bg:#1c1410;
+    --panel:#2a1d16;
+    --panel-line:rgba(255,122,61,.25);
+    --cream:#fff3e0;
+    --muscle:#ff7a3d;
+    --success:#4ade5f;
+    --danger:#ff4d5e;
+    --combo:#ffd23c;
+    --muted:#a8927e;
+    --hud:"Press Start 2P", ui-monospace, "SFMono-Regular", Menlo, monospace;
+    --kr:"Gothic A1", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  }
+  *{ box-sizing:border-box; }
+
+  body{
+    margin:0; min-height:100dvh;
+    background:radial-gradient(120% 80% at 50% 0%, #3a2415 0%, #1c1410 55%, #120c09 100%);
+    color:var(--cream); font-family:var(--kr);
+    display:flex; align-items:center; justify-content:center;
+    overflow:hidden; -webkit-tap-highlight-color:transparent;
+  }
+
+  .app{
+    position:relative;
+    width:min(100vw, 720px);
+    height:min(100dvh, 1000px);
+    background:var(--bg);
+    overflow:hidden;
+    box-shadow:0 0 0 1px var(--panel-line), 0 0 70px rgba(0,0,0,.7);
+  }
+
+  /* ============================ SCREENS ============================ */
+  .screen{
+    position:absolute; inset:0;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:16px; padding:24px; text-align:center;
+  }
+  .screen[hidden]{ display:none; }
+
+  /* ---- TITLE ---- */
+  .logo{
+    font-family:var(--hud); font-size:clamp(20px,6vmin,34px); line-height:1.7;
+    color:var(--muscle); text-shadow:0 0 18px rgba(255,122,61,.6);
+  }
+  .tagline{ color:var(--muted); font-size:clamp(12px,2.2vmin,15px); }
+
+  .btn{
+    font-family:var(--hud); font-size:clamp(12px,2.4vmin,16px);
+    padding:14px 28px; background:var(--muscle); color:#1c1410; border:none;
+    cursor:pointer; box-shadow:0 4px 0 #a8481f; letter-spacing:.06em;
+  }
+  .btn:active{ transform:translateY(3px); box-shadow:0 1px 0 #a8481f; }
+  .btn--ghost{
+    background:transparent; color:var(--muted); border:1px solid var(--muted);
+    box-shadow:none; padding:8px 16px; font-size:clamp(9px,1.8vmin,12px);
+  }
+
+  /* ---- CUTSCENE ---- */
+  .screen--cutscene{ cursor:pointer; }
+  .cutscene-figure{ font-size:clamp(48px,14vmin,96px); }
+  .cutscene-text{ font-size:clamp(14px,2.6vmin,18px); min-height:2.6em; max-width:32em; }
+  .btn--skip{ position:absolute; right:16px; bottom:16px; }
+
+  /* ---- PLAYING ---- */
+  .screen--playing{ justify-content:flex-start; padding:0; gap:0; }
+
+  .hud{
+    width:100%; display:flex; justify-content:space-around; align-items:center;
+    padding:10px 6px; background:var(--panel);
+    border-bottom:1px solid var(--panel-line);
+    font-family:var(--hud);
+  }
+  .hud-stat{ display:flex; flex-direction:column; align-items:center; gap:5px; }
+  .hud-label{ font-size:clamp(6px,1.3vmin,8px); color:var(--muted); letter-spacing:.12em; }
+  .hud-value{ font-size:clamp(10px,2vmin,15px); color:var(--cream); font-variant-numeric:tabular-nums; }
+  .hud-stat.muscle .hud-value{ color:var(--muscle); }
+  .hud-stat.combo .hud-value{ color:var(--combo); }
+
+  .board{
+    flex:1; width:100%; display:grid;
+    grid-template-columns:minmax(84px,auto) 1fr minmax(76px,auto);
+    grid-template-areas:"character puzzle items";
+    gap:10px; padding:12px; min-height:0;
+  }
+  .panel{ background:var(--panel); border:1px solid var(--panel-line); min-height:0; }
+  .panel--character{ grid-area:character; display:flex; align-items:center; justify-content:center; }
+  .panel--puzzle{ grid-area:puzzle; display:flex; align-items:center; justify-content:center; }
+  .panel--items{ grid-area:items; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; }
+
+  .character{ display:flex; flex-direction:column; align-items:center; gap:8px; }
+  .character-sprite{ font-size:clamp(34px,8vmin,54px); line-height:1; }
+  .character-sprite.pop{ animation:pop .32s ease; }
+  @keyframes pop{ 0%{ transform:scale(1); } 45%{ transform:scale(1.22); } 100%{ transform:scale(1); } }
+  .character-state{ font-family:var(--hud); font-size:clamp(6px,1.2vmin,8px); color:var(--muted); letter-spacing:.06em; }
+
+  .placeholder-note{ color:var(--muted); font-size:clamp(11px,2vmin,14px); padding:20px; }
+
+  .item-slot{ display:flex; flex-direction:column; align-items:center; gap:4px; opacity:.55; }
+  .item-icon{ font-size:clamp(20px,4vmin,26px); }
+  .item-count{ font-family:var(--hud); font-size:clamp(9px,1.6vmin,12px); }
+
+  /* ---- CLEAR / GAME OVER ---- */
+  .screen--clear h2, .screen--gameover h2{
+    font-family:var(--hud); font-size:clamp(20px,5vmin,32px); margin:0;
+  }
+  .screen--clear h2{ color:var(--success); text-shadow:0 0 18px rgba(74,222,95,.6); }
+  .screen--gameover h2{ color:var(--danger); text-shadow:0 0 18px rgba(255,77,94,.6); }
+  .character-sprite.big{ font-size:clamp(56px,14vmin,92px); }
+  .result-line{ font-family:var(--hud); font-size:clamp(11px,2.2vmin,15px); color:var(--cream); }
+  .result-sub{ color:var(--muted); font-size:clamp(11px,2vmin,14px); }
+
+  /* ---- responsive: stack panels on narrow screens ---- */
+  @media (max-width:640px){
+    .board{
+      grid-template-columns:1fr;
+      grid-template-areas:"character" "puzzle" "items";
+      grid-auto-rows:min-content auto min-content;
+    }
+    .panel--character{ padding:8px; }
+    .panel--items{ flex-direction:row; padding:8px; }
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    .character-sprite.pop{ animation:none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app" id="app">
+
+  <!-- ============================ TITLE ============================ -->
+  <section class="screen screen--title" id="screenTitle">
+    <div class="logo">머슬머슬<br>로직</div>
+    <p class="tagline">풀수록 커지는 근육 퍼즐</p>
+    <button class="btn" id="btnStart" type="button">START</button>
+  </section>
+
+  <!-- ============================ CUTSCENE ============================ -->
+  <section class="screen screen--cutscene" id="screenCutscene" hidden>
+    <div class="cutscene-figure" id="cutsceneFigure">🧍</div>
+    <p class="cutscene-text" id="cutsceneText"></p>
+    <button class="btn btn--ghost btn--skip" id="btnSkipCutscene" type="button">SKIP ▶</button>
+  </section>
+
+  <!-- ============================ PLAYING ============================ -->
+  <section class="screen screen--playing" id="screenPlaying" hidden>
+    <header class="hud">
+      <div class="hud-stat muscle">
+        <span class="hud-label">근육</span>
+        <span class="hud-value" id="statMuscleLevel">LV.1</span>
+      </div>
+      <div class="hud-stat">
+        <span class="hud-label">시간</span>
+        <span class="hud-value" id="statTime">02:00</span>
+      </div>
+      <div class="hud-stat combo">
+        <span class="hud-label">콤보</span>
+        <span class="hud-value" id="statCombo">0</span>
+      </div>
+      <div class="hud-stat">
+        <span class="hud-label">점수</span>
+        <span class="hud-value" id="statScore">0</span>
+      </div>
+    </header>
+
+    <div class="board">
+      <aside class="panel panel--character" id="panelCharacter">
+        <div class="character">
+          <div class="character-sprite" id="characterSprite">🧍</div>
+          <div class="character-state" id="characterState">IDLE</div>
+        </div>
+      </aside>
+
+      <div class="panel panel--puzzle" id="panelPuzzle">
+        <p class="placeholder-note">퍼즐 시스템은 PHASE 3에서 구현됩니다</p>
+      </div>
+
+      <aside class="panel panel--items" id="panelItems">
+        <div class="item-slot" data-item="dumbbell">
+          <span class="item-icon">🏋️</span>
+          <span class="item-count" id="itemCountDumbbell">0</span>
+        </div>
+        <div class="item-slot" data-item="protein">
+          <span class="item-icon">🥤</span>
+          <span class="item-count" id="itemCountProtein">0</span>
+        </div>
+        <div class="item-slot" data-item="onemore">
+          <span class="item-icon">🧑‍🏫</span>
+          <span class="item-count" id="itemCountOnemore">0</span>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ============================ CLEAR ============================ -->
+  <section class="screen screen--clear" id="screenClear" hidden>
+    <h2>CLEAR!</h2>
+    <div class="character-sprite big" id="clearSprite">😆</div>
+    <p class="result-line" id="clearScore">SCORE 0</p>
+    <p class="result-sub" id="clearMuscle">마른 몸 (LV.1)</p>
+    <button class="btn" id="btnClearRestart" type="button">다시 하기</button>
+  </section>
+
+  <!-- ============================ GAME OVER ============================ -->
+  <section class="screen screen--gameover" id="screenGameOver" hidden>
+    <h2>GAME OVER</h2>
+    <div class="character-sprite big" id="gameOverSprite">💤</div>
+    <p class="result-line" id="gameOverScore">SCORE 0</p>
+    <button class="btn" id="btnGameOverRestart" type="button">다시 하기</button>
+  </section>
+
+</div>
+
+<script>
+(function(){
+  'use strict';
+
+  /* ================================================================
+     CONFIG — every tunable number lives here, nothing inline.
+     Sections marked (미사용) are declared now so later PHASEs only
+     ever fill in behavior, never restructure this object.
+     ================================================================ */
+  const CONFIG = {
+    TIMER: {
+      INITIAL_TIME: 120,           // PHASE 5
+      WRONG_ANSWER_PENALTY: 5      // PHASE 5
+    },
+    COMBO: {
+      HYPE_THRESHOLD: 5            // PHASE 6/8 — 이 콤보 이상이면 EXERCISE_HYPE
+    },
+    SCORE: {                       // PHASE 7 (미사용)
+      BASE_SCORE: 10,
+      COMBO_BONUS_PER_STEP: 2,
+      TIME_BONUS_MULTIPLIER: 5,
+      WRONG_ANSWER_PENALTY: 15,
+      ITEM_USAGE_PENALTY: 20
+    },
+    MUSCLE_LEVELS: [                // PHASE 12 (표시만 우선 사용)
+      { level:1, min:0,    max:999,      label:'마른 몸' },
+      { level:2, min:1000, max:1999,     label:'탄탄한 몸' },
+      { level:3, min:2000, max:2999,     label:'강한 근육' },
+      { level:4, min:3000, max:Infinity, label:'매우 근육질' }
+    ],
+    ITEMS: {                        // PHASE 10 (개수 표시만 우선 사용)
+      dumbbell: { count:3, label:'덤벨' },
+      protein:  { count:2, label:'프로틴 쉐이크' },
+      onemore:  { count:1, label:'PT쌤의 One More!' }
+    },
+    CUTSCENE: {
+      AUTO_ADVANCE_MS: 1800,
+      SLIDES: [
+        { figure:'🧍', text:'주인공은... 매우 말랐다.' },
+        { figure:'😤', text:'이대로는 안 되겠다. 오늘부터 운동이다!' },
+        { figure:'🏋️', text:'저 덤벨을 잡아야 한다...' },
+        { figure:'💪', text:'자, 시작해보자!' }
+      ]
+    }
+  };
+
+  const $ = id => document.getElementById(id);
+
+  /* ================================================================
+     DOM REFS
+     ================================================================ */
+  const screens = {
+    TITLE:     $('screenTitle'),
+    CUTSCENE:  $('screenCutscene'),
+    PLAYING:   $('screenPlaying'),
+    CLEAR:     $('screenClear'),
+    GAME_OVER: $('screenGameOver')
+  };
+
+  const elMuscleLevel     = $('statMuscleLevel');
+  const elTime            = $('statTime');
+  const elCombo           = $('statCombo');
+  const elScore           = $('statScore');
+  const elCutsceneFigure  = $('cutsceneFigure');
+  const elCutsceneText    = $('cutsceneText');
+  const elCharacterSprite = $('characterSprite');
+  const elCharacterState  = $('characterState');
+  const elClearScore      = $('clearScore');
+  const elClearMuscle     = $('clearMuscle');
+  const elGameOverScore   = $('gameOverScore');
+
+  /* ================================================================
+     GAME MANAGER — top-level state machine.
+     TITLE -> CUTSCENE -> PLAYING -> CLEAR | GAME_OVER
+     Each state gates which screen is visible and whether puzzle
+     input is allowed (only PLAYING permits it, per spec §16).
+     ================================================================ */
+  const GameManager = {
+    state: 'TITLE',
+    inputAllowed(){
+      return this.state === 'PLAYING';
+    },
+    setState(next){
+      this.state = next;
+      for(const key in screens) screens[key].hidden = key !== next;
+
+      if(next === 'CUTSCENE') Cutscene.start();
+      if(next === 'PLAYING')  CharacterManager.setState('IDLE');
+      if(next === 'CLEAR')    CharacterManager.setState('CLEAR');
+      if(next === 'GAME_OVER') CharacterManager.setState('GAME_OVER');
+
+      UIManager.syncAll();
+    }
+  };
+
+  /* ================================================================
+     CHARACTER MANAGER — character state machine.
+     IDLE / EXERCISE / EXERCISE_HYPE / MISTAKE / CLEAR / GAME_OVER
+     Visuals are emoji placeholders for now (spec §18) — swapping in
+     real sprites later only means editing CHARACTER_SPRITES below.
+     ================================================================ */
+  const CHARACTER_SPRITES = {
+    IDLE: '🧍',
+    EXERCISE: '💪',
+    EXERCISE_HYPE: '🔥',
+    MISTAKE: '😵',
+    CLEAR: '😆',
+    GAME_OVER: '💤'
+  };
+
+  const CharacterManager = {
+    state: 'IDLE',
+    setState(next){
+      this.state = next;
+      elCharacterSprite.textContent = CHARACTER_SPRITES[next] || CHARACTER_SPRITES.IDLE;
+      elCharacterState.textContent = next;
+      elCharacterSprite.classList.remove('pop');
+      void elCharacterSprite.offsetWidth; // restart the CSS animation
+      elCharacterSprite.classList.add('pop');
+    }
+  };
+
+  /* ================================================================
+     UI MANAGER — HUD + result-screen text sync.
+     Holds the placeholder stat values other managers will own from
+     PHASE 5 (timer) / 6 (combo) / 7 (score) onward.
+     ================================================================ */
+  function formatTime(totalSeconds){
+    const m = Math.floor(totalSeconds / 60);
+    const s = Math.floor(totalSeconds % 60);
+    return String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+  }
+
+  function muscleLevelFor(score){
+    return CONFIG.MUSCLE_LEVELS.find(l => score >= l.min && score <= l.max)
+      || CONFIG.MUSCLE_LEVELS[0];
+  }
+
+  const UIManager = {
+    score: 0,
+    combo: 0,
+    timeLeft: CONFIG.TIMER.INITIAL_TIME,
+    syncAll(){
+      const ml = muscleLevelFor(this.score);
+      elMuscleLevel.textContent = 'LV.' + ml.level;
+      elTime.textContent = formatTime(this.timeLeft);
+      elCombo.textContent = this.combo;
+      elScore.textContent = this.score;
+      elClearScore.textContent = 'SCORE ' + this.score;
+      elClearMuscle.textContent = ml.label + ' (LV.' + ml.level + ')';
+      elGameOverScore.textContent = 'SCORE ' + this.score;
+    }
+  };
+
+  /* ================================================================
+     CUTSCENE — minimal placeholder slideshow (spec §3).
+     Auto-advances, but a click/tap or SKIP jumps straight to PLAYING.
+     Visual polish is deferred to PHASE 13.
+     ================================================================ */
+  const Cutscene = {
+    idx: 0,
+    timer: null,
+    start(){
+      this.idx = 0;
+      this.render();
+      this.schedule();
+    },
+    schedule(){
+      clearTimeout(this.timer);
+      this.timer = setTimeout(() => this.next(), CONFIG.CUTSCENE.AUTO_ADVANCE_MS);
+    },
+    render(){
+      const slide = CONFIG.CUTSCENE.SLIDES[this.idx];
+      elCutsceneFigure.textContent = slide.figure;
+      elCutsceneText.textContent = slide.text;
+    },
+    next(){
+      this.idx += 1;
+      if(this.idx >= CONFIG.CUTSCENE.SLIDES.length){
+        clearTimeout(this.timer);
+        GameManager.setState('PLAYING');
+        return;
+      }
+      this.render();
+      this.schedule();
+    },
+    skip(){
+      clearTimeout(this.timer);
+      GameManager.setState('PLAYING');
+    }
+  };
+
+  /* ================================================================
+     ITEM PANEL — static counts read from CONFIG for now.
+     Real consumption/disable-at-zero behavior arrives with
+     ItemManager in PHASE 10.
+     ================================================================ */
+  function renderItemPanel(){
+    $('itemCountDumbbell').textContent = CONFIG.ITEMS.dumbbell.count;
+    $('itemCountProtein').textContent  = CONFIG.ITEMS.protein.count;
+    $('itemCountOnemore').textContent  = CONFIG.ITEMS.onemore.count;
+  }
+
+  /* ================================================================
+     BOOT + EVENTS
+     ================================================================ */
+  function restart(){
+    UIManager.score = 0;
+    UIManager.combo = 0;
+    UIManager.timeLeft = CONFIG.TIMER.INITIAL_TIME;
+    GameManager.setState('PLAYING');
+  }
+
+  $('btnStart').addEventListener('click', () => GameManager.setState('CUTSCENE'));
+  $('btnSkipCutscene').addEventListener('click', () => Cutscene.skip());
+  $('btnClearRestart').addEventListener('click', restart);
+  $('btnGameOverRestart').addEventListener('click', restart);
+  $('screenCutscene').addEventListener('click', e => {
+    if(e.target.closest('#btnSkipCutscene')) return;
+    Cutscene.next();
+  });
+
+  renderItemPanel();
+  GameManager.setState('TITLE');
+  UIManager.syncAll();
+
+  /* ================================================================
+     DEBUG / TEST HOOK — mirrors the existing project's window.__ES__
+     convention. Safe to strip in production; nothing depends on it.
+     ================================================================ */
+  window.__MML__ = {
+    snap: () => ({
+      gameState: GameManager.state,
+      characterState: CharacterManager.state,
+      score: UIManager.score,
+      combo: UIManager.combo,
+      timeLeft: UIManager.timeLeft
+    }),
+    forceGameState: s => GameManager.setState(s),
+    forceCharacterState: s => CharacterManager.setState(s),
+    setScore: v => { UIManager.score = v; UIManager.syncAll(); },
+    restart
+  };
+})();
+</script>
+</body>
+</html>
