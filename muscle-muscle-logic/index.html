@@ -88,6 +88,13 @@
   .hud-stat.muscle .hud-value{ color:var(--muscle); }
   .hud-stat.combo .hud-value{ color:var(--combo); }
 
+  .hud-value.warning{ color:var(--combo); }
+  .hud-value.critical{ color:var(--danger); animation:timeBlink 1s steps(1) infinite; }
+  @keyframes timeBlink{ 50%{ opacity:.35; } }
+
+  .hud-value.combo-pop{ animation:comboPop .3s ease; }
+  @keyframes comboPop{ 0%{ transform:scale(1); } 50%{ transform:scale(1.4); } 100%{ transform:scale(1); } }
+
   .board{
     flex:1; width:100%; display:grid;
     grid-template-columns:minmax(84px,auto) 1fr minmax(76px,auto);
@@ -178,6 +185,8 @@
   @media (prefers-reduced-motion: reduce){
     .character-sprite.pop{ animation:none; }
     .ng-cell.flash-correct, .ng-cell.flash-wrong{ animation:none; }
+    .hud-value.critical{ animation:none; }
+    .hud-value.combo-pop{ animation:none; }
   }
 </style>
 </head>
@@ -285,11 +294,14 @@
      ================================================================ */
   const CONFIG = {
     TIMER: {
-      INITIAL_TIME: 120,           // PHASE 5
-      WRONG_ANSWER_PENALTY: 5      // PHASE 5
+      INITIAL_TIME: 120,
+      WRONG_ANSWER_PENALTY: 5,
+      WARNING_AT: 20,              // 이 값 이하면 HUD 경고 표시
+      CRITICAL_AT: 10              // 이 값 이하면 더 강한 경고(깜빡임)
     },
     COMBO: {
-      HYPE_THRESHOLD: 5            // PHASE 6/8 — 이 콤보 이상이면 EXERCISE_HYPE
+      HYPE_THRESHOLD: 5,           // PHASE 8 — 이 콤보 이상이면 EXERCISE_HYPE
+      MAX: 999                     // 콤보 상한(안전장치)
     },
     SCORE: {                       // PHASE 7 (미사용)
       BASE_SCORE: 10,
@@ -335,6 +347,87 @@
     emit(type, payload){
       (this.handlers[type] || []).forEach(fn => fn(payload));
     }
+  };
+
+  /* ================================================================
+     TIMER MANAGER — the countdown clock. Only ever emits; never
+     touches UIManager or GameManager directly (spec §16). A tick,
+     addTime, subtractTime and setTime all funnel through applyTime so
+     the "reached zero -> stop + TIME_UP" rule can't be skipped by any
+     of them.
+     ================================================================ */
+  const TimerManager = {
+    timeLeft: CONFIG.TIMER.INITIAL_TIME,
+    intervalId: null,
+
+    applyTime(newTime){
+      this.timeLeft = Math.max(0, newTime);
+      EventBus.emit('TIME_UPDATED', { timeLeft:this.timeLeft });
+      if(this.timeLeft <= 0){
+        this.pause();
+        EventBus.emit('TIME_UP', {});
+      }
+    },
+
+    reset(){
+      this.pause();
+      this.applyTime(CONFIG.TIMER.INITIAL_TIME);
+    },
+
+    // Pausing first guarantees only one interval is ever running, no
+    // matter how many times (or from where) start() gets called —
+    // START, then RESTART, then another RESTART never stack up.
+    start(){
+      this.pause();
+      if(this.timeLeft > 0){
+        this.intervalId = setInterval(() => this.applyTime(this.timeLeft - 1), 1000);
+      }
+    },
+
+    pause(){
+      if(this.intervalId !== null){
+        clearInterval(this.intervalId);
+        this.intervalId = null;
+      }
+    },
+
+    resume(){ this.start(); },
+    stop(){ this.pause(); },
+
+    addTime(amount){ this.applyTime(this.timeLeft + amount); },
+    subtractTime(amount){ this.applyTime(this.timeLeft - amount); },
+    setTime(seconds){ this.applyTime(seconds); },
+
+    getTimeLeft(){ return this.timeLeft; }
+  };
+
+  /* ================================================================
+     COMBO MANAGER — consecutive-correct streak. Only ever emits
+     COMBO_CHANGED; never touches UIManager/CharacterManager directly.
+     ================================================================ */
+  const ComboManager = {
+    current: 0,
+    max: 0,
+
+    reset(){
+      this.current = 0;
+      this.max = 0;
+      EventBus.emit('COMBO_CHANGED', { currentCombo:this.current, maxCombo:this.max });
+    },
+
+    add(){
+      this.current = Math.min(this.current + 1, CONFIG.COMBO.MAX);
+      if(this.current > this.max) this.max = this.current;
+      EventBus.emit('COMBO_CHANGED', { currentCombo:this.current, maxCombo:this.max });
+    },
+
+    break(){
+      this.current = 0;
+      EventBus.emit('COMBO_CHANGED', { currentCombo:this.current, maxCombo:this.max });
+    },
+
+    getCurrent(){ return this.current; },
+    getMax(){ return this.max; }
   };
 
   /* ================================================================
@@ -647,9 +740,18 @@
       for(const key in screens) screens[key].hidden = key !== next;
 
       if(next === 'CUTSCENE') Cutscene.start();
-      if(next === 'PLAYING')  CharacterManager.setState('IDLE');
-      if(next === 'CLEAR')    CharacterManager.setState('CLEAR');
-      if(next === 'GAME_OVER') CharacterManager.setState('GAME_OVER');
+      if(next === 'PLAYING'){
+        CharacterManager.setState('IDLE');
+        TimerManager.start();
+      }
+      if(next === 'CLEAR'){
+        CharacterManager.setState('CLEAR');
+        TimerManager.stop();
+      }
+      if(next === 'GAME_OVER'){
+        CharacterManager.setState('GAME_OVER');
+        TimerManager.stop();
+      }
 
       UIManager.syncAll();
     }
@@ -684,8 +786,11 @@
 
   /* ================================================================
      UI MANAGER — HUD + result-screen text sync.
-     Holds the placeholder stat values other managers will own from
-     PHASE 5 (timer) / 6 (combo) / 7 (score) onward.
+     Score is still a plain placeholder value here (PHASE 7 gives it a
+     real ScoreManager). Time/combo are no longer owned here — they
+     live in TimerManager/ComboManager, and reach the HUD only via the
+     TIME_UPDATED/COMBO_CHANGED subscriptions set up in BOOT, so
+     neither manager ever has to call into UIManager itself.
      ================================================================ */
   function formatTime(totalSeconds){
     const m = Math.floor(totalSeconds / 60);
@@ -700,17 +805,33 @@
 
   const UIManager = {
     score: 0,
-    combo: 0,
-    timeLeft: CONFIG.TIMER.INITIAL_TIME,
+    prevCombo: 0,
+
     syncAll(){
       const ml = muscleLevelFor(this.score);
       elMuscleLevel.textContent = 'LV.' + ml.level;
-      elTime.textContent = formatTime(this.timeLeft);
-      elCombo.textContent = this.combo;
       elScore.textContent = this.score;
       elClearScore.textContent = 'SCORE ' + this.score;
       elClearMuscle.textContent = ml.label + ' (LV.' + ml.level + ')';
       elGameOverScore.textContent = 'SCORE ' + this.score;
+      this.syncTime(TimerManager.getTimeLeft());
+      this.syncCombo(ComboManager.getCurrent());
+    },
+
+    syncTime(timeLeft){
+      elTime.textContent = formatTime(timeLeft);
+      elTime.classList.toggle('critical', timeLeft <= CONFIG.TIMER.CRITICAL_AT);
+      elTime.classList.toggle('warning', timeLeft > CONFIG.TIMER.CRITICAL_AT && timeLeft <= CONFIG.TIMER.WARNING_AT);
+    },
+
+    syncCombo(current){
+      elCombo.textContent = current;
+      if(current > this.prevCombo){
+        elCombo.classList.remove('combo-pop');
+        void elCombo.offsetWidth;
+        elCombo.classList.add('combo-pop');
+      }
+      this.prevCombo = current;
     }
   };
 
@@ -881,11 +1002,11 @@
      ================================================================ */
   function restart(){
     UIManager.score = 0;
-    UIManager.combo = 0;
-    UIManager.timeLeft = CONFIG.TIMER.INITIAL_TIME;
+    TimerManager.reset();
+    ComboManager.reset();
     PuzzleManager.load(SAMPLE_PUZZLES[0]);
     PuzzleRenderer.renderAll();
-    GameManager.setState('PLAYING');
+    GameManager.setState('PLAYING'); // starts the timer fresh via GameManager.setState
   }
 
   $('btnStart').addEventListener('click', () => GameManager.setState('CUTSCENE'));
@@ -904,6 +1025,29 @@
     if(GameManager.state === 'PLAYING') GameManager.setState('CLEAR');
   });
 
+  // Time running out is the other way PLAYING ends (spec §7/§16):
+  // TimerManager only ever announces TIME_UP, GameManager decides
+  // what that means.
+  EventBus.on('TIME_UP', () => {
+    if(GameManager.state === 'PLAYING') GameManager.setState('GAME_OVER');
+  });
+
+  // Every cell judgement reaches Timer and Combo through the same
+  // PUZZLE_CELL_RESULT event PuzzleManager already emits (PHASE 4) —
+  // each fires exactly once per input, so a wrong answer can never
+  // double up its time penalty or its combo break (spec §6/§21).
+  EventBus.on('PUZZLE_CELL_RESULT', result => {
+    if(result.correct === false) TimerManager.subtractTime(CONFIG.TIMER.WRONG_ANSWER_PENALTY);
+  });
+  EventBus.on('PUZZLE_CELL_RESULT', result => {
+    if(result.correct === true) ComboManager.add();
+    else if(result.correct === false) ComboManager.break();
+    // correct === null (an UNKNOWN undo) leaves the combo untouched.
+  });
+
+  EventBus.on('TIME_UPDATED', ({ timeLeft }) => UIManager.syncTime(timeLeft));
+  EventBus.on('COMBO_CHANGED', ({ currentCombo }) => UIManager.syncCombo(currentCombo));
+
   initPuzzleInput();
   PuzzleManager.load(SAMPLE_PUZZLES[0]);
   PuzzleRenderer.renderAll();
@@ -920,8 +1064,9 @@
       gameState: GameManager.state,
       characterState: CharacterManager.state,
       score: UIManager.score,
-      combo: UIManager.combo,
-      timeLeft: UIManager.timeLeft
+      combo: ComboManager.getCurrent(),
+      maxCombo: ComboManager.getMax(),
+      timeLeft: TimerManager.getTimeLeft()
     }),
     forceGameState: s => GameManager.setState(s),
     forceCharacterState: s => CharacterManager.setState(s),
@@ -966,7 +1111,20 @@
       return { row, col, expected, actual, correct };
     },
     getInputMode: () => InputMode.current,
-    setInputMode: mode => InputMode.set(mode)
+    setInputMode: mode => InputMode.set(mode),
+
+    // PHASE 5 — TimerManager test surface
+    getTime: () => TimerManager.getTimeLeft(),
+    setTime: seconds => TimerManager.setTime(seconds),
+    startTimer: () => TimerManager.start(),
+    pauseTimer: () => TimerManager.pause(),
+    stopTimer: () => TimerManager.stop(),
+    forceTimeUp: () => TimerManager.setTime(0),
+
+    // PHASE 6 — ComboManager test surface
+    getCombo: () => ComboManager.getCurrent(),
+    getMaxCombo: () => ComboManager.getMax(),
+    resetCombo: () => ComboManager.reset()
   };
 })();
 </script>
