@@ -50,6 +50,8 @@
   .screen[hidden]{ display:none; }
 
   /* ---- TITLE ---- */
+  .title-character{ font-size:clamp(40px,10vmin,64px); animation:titleBob 2.2s ease-in-out infinite; }
+  @keyframes titleBob{ 0%,100%{ transform:translateY(0); } 50%{ transform:translateY(-8px); } }
   .logo{
     font-family:var(--hud); font-size:clamp(20px,6vmin,34px); line-height:1.7;
     color:var(--muscle); text-shadow:0 0 18px rgba(255,122,61,.6);
@@ -227,7 +229,14 @@
   .screen--gameover h2{ color:var(--danger); text-shadow:0 0 18px rgba(255,77,94,.6); }
   .character-sprite.big{ font-size:clamp(56px,14vmin,92px); }
   .result-line{ font-family:var(--hud); font-size:clamp(11px,2.2vmin,15px); color:var(--cream); }
+  .result-detail{ font-family:var(--hud); font-size:clamp(9px,1.7vmin,12px); color:var(--muted); margin:0; }
   .result-sub{ color:var(--muted); font-size:clamp(11px,2vmin,14px); }
+
+  #clearSprite.muscle-lv-1{ transform:scale(.85); }
+  #clearSprite.muscle-lv-2{ transform:scale(.95); }
+  #clearSprite.muscle-lv-3{ transform:scale(1.05); }
+  #clearSprite.muscle-lv-4{ transform:scale(1.2); filter:drop-shadow(0 0 8px var(--muscle)); }
+  #clearSprite.muscle-lv-5{ transform:scale(1.35); filter:drop-shadow(0 0 14px var(--muscle)); }
 
   /* ---- responsive: stack panels on narrow screens ---- */
   @media (max-width:640px){
@@ -247,6 +256,7 @@
     .hud-value.critical{ animation:none; }
     .hud-value.combo-pop{ animation:none; }
     .score-popup{ animation:scorePopupReduced .7s ease forwards; }
+    .title-character{ animation:none; }
   }
   @keyframes scorePopupReduced{ 0%{ opacity:1; } 100%{ opacity:0; } }
 </style>
@@ -257,6 +267,7 @@
 
   <!-- ============================ TITLE ============================ -->
   <section class="screen screen--title" id="screenTitle">
+    <div class="title-character" id="titleCharacter">🧍</div>
     <div class="logo">머슬머슬<br>로직</div>
     <p class="tagline">풀수록 커지는 근육 퍼즐</p>
     <button class="btn" id="btnStart" type="button">START</button>
@@ -334,6 +345,8 @@
     <h2>CLEAR!</h2>
     <div class="character-sprite big" id="clearSprite">😆</div>
     <p class="result-line" id="clearScore">SCORE 0</p>
+    <p class="result-detail" id="clearMaxCombo">MAX COMBO 0</p>
+    <p class="result-detail" id="clearTimeBonus">TIME BONUS +0</p>
     <p class="result-sub" id="clearMuscle">마른 몸 (LV.1)</p>
     <button class="btn" id="btnClearRestart" type="button">다시 하기</button>
   </section>
@@ -353,9 +366,9 @@
   'use strict';
 
   /* ================================================================
-     CONFIG — every tunable number lives here, nothing inline.
-     Sections marked (미사용) are declared now so later PHASEs only
-     ever fill in behavior, never restructure this object.
+     CONFIG — every tunable number lives here, nothing inline. Every
+     section below is live and read by real game logic (this was
+     filled in phase by phase from PHASE 2 through PHASE 12).
      ================================================================ */
   const CONFIG = {
     TIMER: {
@@ -382,12 +395,15 @@
     MISTAKE: {
       DURATION_MS: 700             // PHASE 9 — 오답 시 MISTAKE 연출 유지 시간
     },
-    MUSCLE_LEVELS: [                // PHASE 12 (표시만 우선 사용)
-      { level:1, min:0,    max:999,      label:'마른 몸' },
-      { level:2, min:1000, max:1999,     label:'탄탄한 몸' },
-      { level:3, min:2000, max:2999,     label:'강한 근육' },
-      { level:4, min:3000, max:Infinity, label:'매우 근육질' }
-    ],
+    MUSCLE: {
+      LEVELS: [                    // score >= minScore, highest match wins — keep sorted ascending
+        { level:1, minScore:0,    label:'아주 마른 상태' },
+        { level:2, minScore:1000, label:'조금 운동한 상태' },
+        { level:3, minScore:2000, label:'탄탄한 상태' },
+        { level:4, minScore:3000, label:'근육질' },
+        { level:5, minScore:4000, label:'엄청난 근육질' }
+      ]
+    },
     ITEMS: {
       dumbbell: { count:3, label:'덤벨' },
       protein:  { count:2, label:'프로틴 쉐이크' },
@@ -395,11 +411,12 @@
       PROTEIN_RADIUS: 1            // PHASE 10 — 중심 포함 반경 1 = 3×3
     },
     CUTSCENE: {
-      AUTO_ADVANCE_MS: 1800,
+      AUTO_ADVANCE_MS: 1300,        // 5 slides × 1.3s ≈ 6.5s 총 재생시간 (목표 4~7s)
       SLIDES: [
         { figure:'🧍', text:'주인공은... 매우 말랐다.' },
         { figure:'😤', text:'이대로는 안 되겠다. 오늘부터 운동이다!' },
-        { figure:'🏋️', text:'저 덤벨을 잡아야 한다...' },
+        { figure:'👀', text:'어? 저기 덤벨이 있다!' },
+        { figure:'🙌', text:'좋아, 저 덤벨을 잡아보자...' },
         { figure:'💪', text:'자, 시작해보자!' }
       ]
     }
@@ -546,6 +563,31 @@
 
     getScore(){ return this.score; },
     getFinalScore(){ return this.score; }
+  };
+
+  /* ================================================================
+     MUSCLE MANAGER — a pure score -> level lookup, no state of its
+     own (spec PHASE 12 §2-4: same score always yields the same
+     level). Nothing to reset, so RESTART can't leave a stale level
+     behind even without calling reset() — it's kept only to match
+     the requested API shape.
+     ================================================================ */
+  const MuscleManager = {
+    getLevelForScore(score){
+      const levels = CONFIG.MUSCLE.LEVELS;
+      let matched = levels[0];
+      for(const l of levels){
+        if(score >= l.minScore) matched = l;
+      }
+      return matched;
+    },
+    getCurrentMuscleData(){
+      return this.getLevelForScore(ScoreManager.getScore());
+    },
+    getLevel(){
+      return this.getCurrentMuscleData().level;
+    },
+    reset(){ /* stateless — see comment above */ }
   };
 
   /* ================================================================
@@ -820,9 +862,11 @@
     // The real gameplay entry point (PHASE 4): sets the cell like
     // setCell(), then announces the outcome over EventBus instead of
     // calling UI/CharacterManager directly, so Combo/Score/Character
-    // can subscribe later without PuzzleManager knowing they exist.
-    // `source` lets a future ItemManager (PHASE 10) reveal a cell
-    // through this same path without it looking like a player guess.
+    // can subscribe without PuzzleManager knowing they exist. `source`
+    // tags every emitted result as player-driven; ItemManager (PHASE
+    // 10) never calls this method at all — it reveals cells through
+    // the separate revealCell()/revealGrid below, which is what keeps
+    // an item reveal from ever being mistaken for a player guess.
     applyPlayerInput(row, col, nextState, source='PLAYER'){
       const result = this.setCell(row, col, nextState);
       if(!result) return null;
@@ -941,7 +985,11 @@
   const elCharacterSprite = $('characterSprite');
   const elCharacterState  = $('characterState');
   const elDumbbellDrop    = $('dumbbellDrop');
+  const elClearSprite     = $('clearSprite');
+  const elGameOverSprite  = $('gameOverSprite');
   const elClearScore      = $('clearScore');
+  const elClearMaxCombo   = $('clearMaxCombo');
+  const elClearTimeBonus  = $('clearTimeBonus');
   const elClearMuscle     = $('clearMuscle');
   const elGameOverScore   = $('gameOverScore');
   const elNonogramGrid    = $('nonogramGrid');
@@ -979,6 +1027,7 @@
         TimerManager.stop();
         ScoreManager.applyTimeBonus(TimerManager.getTimeLeft()); // §2-4: once, here only — never on GAME_OVER
         ItemManager.cancel(); // §10 5-13: any pending item selection is cancelled immediately
+        UIManager.syncClearResult();
       }
       if(next === 'GAME_OVER'){
         CharacterManager.setState('GAME_OVER');
@@ -1012,12 +1061,27 @@
     OVERHEAD_PRESS: { label:'오버헤드 프레스', icon:'🏋️', hypeIcon:'🏋️🔥' }
   };
 
+  // CLEAR poses by last-used exercise (spec PHASE 11 §1-2): bicep-focused,
+  // lower-body-focused, shoulder-focused.
+  const CLEAR_POSES = {
+    BICEP_CURL: '💪😆',
+    SQUAT: '🦵😆',
+    OVERHEAD_PRESS: '🙌😆'
+  };
+
   const CharacterManager = {
     state: 'IDLE',
-    exercise: null, // set by ExerciseManager from the active puzzle's `exercise` field
+    exercise: null, // set by ExerciseManager from the active puzzle's `exercise` field; persists through CLEAR/GAME_OVER so a pose can still use it
 
     setExercise(type){
       this.exercise = type;
+    },
+
+    // Restarts a CSS animation on `el` by toggling `cls` off/reflow/on.
+    replay(el, cls){
+      el.classList.remove(cls);
+      void el.offsetWidth;
+      el.classList.add(cls);
     },
 
     setState(next){
@@ -1036,10 +1100,21 @@
 
       if(next === 'GAME_OVER'){
         elCharacterSprite.classList.add('game-over-fall');
+        // screenPlaying is hidden the instant GameManager entered this
+        // state, so the fall has to actually play on the RESULT
+        // screen's own sprite — the one further above never gets
+        // painted while GAME_OVER is showing.
+        elGameOverSprite.textContent = CHARACTER_SPRITES.GAME_OVER;
+        this.replay(elGameOverSprite, 'game-over-fall');
       } else if(next === 'MISTAKE'){
         elCharacterSprite.classList.add('mistake-shake');
-        void elDumbbellDrop.offsetWidth;
-        elDumbbellDrop.classList.add('falling');
+        this.replay(elDumbbellDrop, 'falling');
+      } else if(next === 'CLEAR'){
+        elCharacterSprite.classList.add('pop');
+        // Same reasoning as GAME_OVER above — pose on the visible
+        // #clearSprite, not the hidden PLAYING-screen sprite.
+        elClearSprite.textContent = (ex && CLEAR_POSES[this.exercise]) || CHARACTER_SPRITES.CLEAR;
+        this.replay(elClearSprite, 'pop');
       } else {
         elCharacterSprite.classList.add('pop');
         if(next === 'EXERCISE_HYPE') elCharacterSprite.classList.add('hype');
@@ -1074,10 +1149,6 @@
           EventBus.emit('EXERCISE_ENDED', { exercise:PuzzleManager.puzzle.exercise });
         }
       }, CONFIG.EXERCISE.DURATION_MS);
-    },
-
-    cancel(){
-      clearTimeout(this.returnTimer);
     }
   };
 
@@ -1092,6 +1163,14 @@
     returnTimer: null,
 
     trigger(){
+      // A wrong answer that also empties the clock already moved
+      // GameManager to GAME_OVER earlier in this same PUZZLE_CELL_RESULT
+      // chain (TimerManager's handler runs before this one and can emit
+      // TIME_UP synchronously) — don't stomp that pose with MISTAKE.
+      // Found by PHASE 15 integration testing: a wrong click landing
+      // exactly on the last second used to show MISTAKE instead of the
+      // fallen GAME_OVER pose.
+      if(!GameManager.inputAllowed()) return;
       clearTimeout(ExerciseManager.returnTimer);
       CharacterManager.setState('MISTAKE');
 
@@ -1114,11 +1193,6 @@
     return String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
   }
 
-  function muscleLevelFor(score){
-    return CONFIG.MUSCLE_LEVELS.find(l => score >= l.min && score <= l.max)
-      || CONFIG.MUSCLE_LEVELS[0];
-  }
-
   const UIManager = {
     prevCombo: 0,
 
@@ -1129,7 +1203,7 @@
     },
 
     syncScore(score, delta){
-      const ml = muscleLevelFor(score);
+      const ml = MuscleManager.getLevelForScore(score);
       elMuscleLevel.textContent = 'LV.' + ml.level;
       elScore.textContent = score;
       elClearScore.textContent = 'SCORE ' + score;
@@ -1158,6 +1232,20 @@
         elCombo.classList.add('combo-pop');
       }
       this.prevCombo = current;
+    },
+
+    // PHASE 11 — the extra CLEAR-only result lines. TimerManager.stop()
+    // never zeroes timeLeft, so re-deriving the bonus here (same
+    // formula ScoreManager already applied once) needs no data passed
+    // in from GameManager.
+    syncClearResult(){
+      elClearMaxCombo.textContent = 'MAX COMBO ' + ComboManager.getMax();
+      elClearTimeBonus.textContent = 'TIME BONUS +' + (TimerManager.getTimeLeft() * CONFIG.SCORE.TIME_BONUS_PER_SECOND);
+      // PHASE 12 — a visible size/glow bump on the result sprite so a
+      // higher muscle level reads as "bigger," not just a number.
+      const level = MuscleManager.getLevel();
+      for(let i=1;i<=5;i++) elClearSprite.classList.remove('muscle-lv-' + i);
+      elClearSprite.classList.add('muscle-lv-' + level);
     }
   };
 
@@ -1311,9 +1399,10 @@
   }
 
   /* ================================================================
-     CUTSCENE — minimal placeholder slideshow (spec §3).
-     Auto-advances, but a click/tap or SKIP jumps straight to PLAYING.
-     Visual polish is deferred to PHASE 13.
+     CUTSCENE — 5-beat slideshow (spec §3, filled in at PHASE 13).
+     Auto-advances every AUTO_ADVANCE_MS, but a click/tap or SKIP jumps
+     straight to PLAYING. Still text+emoji only, no transitions/art —
+     that would be the next round of visual polish, not required here.
      ================================================================ */
   const Cutscene = {
     idx: 0,
@@ -1566,7 +1655,11 @@
       return result;
     },
     getRevealGrid: () => PuzzleManager.revealGrid,
-    isCellRevealed: (row, col) => PuzzleManager.revealGrid[row][col]
+    isCellRevealed: (row, col) => PuzzleManager.revealGrid[row][col],
+
+    // PHASE 12 — MuscleManager test surface
+    getMuscleLevel: () => MuscleManager.getCurrentMuscleData(),
+    getMuscleLevelForScore: score => MuscleManager.getLevelForScore(score)
   };
 })();
 </script>
