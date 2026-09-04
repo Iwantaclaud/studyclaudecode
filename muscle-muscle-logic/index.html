@@ -96,7 +96,7 @@
   }
   .panel{ background:var(--panel); border:1px solid var(--panel-line); min-height:0; }
   .panel--character{ grid-area:character; display:flex; align-items:center; justify-content:center; }
-  .panel--puzzle{ grid-area:puzzle; display:flex; align-items:center; justify-content:center; }
+  .panel--puzzle{ grid-area:puzzle; display:flex; align-items:center; justify-content:center; overflow:auto; }
   .panel--items{ grid-area:items; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; }
 
   .character{ display:flex; flex-direction:column; align-items:center; gap:8px; }
@@ -105,7 +105,24 @@
   @keyframes pop{ 0%{ transform:scale(1); } 45%{ transform:scale(1.22); } 100%{ transform:scale(1); } }
   .character-state{ font-family:var(--hud); font-size:clamp(6px,1.2vmin,8px); color:var(--muted); letter-spacing:.06em; }
 
-  .placeholder-note{ color:var(--muted); font-size:clamp(11px,2vmin,14px); padding:20px; }
+  /* ---- NONOGRAM PUZZLE ---- */
+  .nonogram{
+    display:grid; gap:2px; background:var(--panel-line); padding:2px;
+    width:min(100%, 340px); aspect-ratio:1; margin:auto;
+  }
+  .ng-corner{ background:var(--bg); }
+  .ng-colhint, .ng-rowhint{
+    background:var(--bg); display:flex; color:var(--muted);
+    font-family:var(--hud); font-size:clamp(6px,1.6vmin,10px);
+    line-height:1.3; font-variant-numeric:tabular-nums;
+  }
+  .ng-colhint{ flex-direction:column; align-items:center; justify-content:flex-end; padding:2px 1px; }
+  .ng-rowhint{ flex-direction:row; align-items:center; justify-content:flex-end; gap:3px; padding:0 4px; white-space:nowrap; }
+  .ng-cell{
+    background:var(--cream); display:flex; align-items:center; justify-content:center;
+    font-size:clamp(7px,1.8vmin,11px); color:var(--danger); font-weight:700; user-select:none;
+  }
+  .ng-cell.filled{ background:var(--muscle); }
 
   .item-slot{ display:flex; flex-direction:column; align-items:center; gap:4px; opacity:.55; }
   .item-icon{ font-size:clamp(20px,4vmin,26px); }
@@ -185,7 +202,7 @@
       </aside>
 
       <div class="panel panel--puzzle" id="panelPuzzle">
-        <p class="placeholder-note">퍼즐 시스템은 PHASE 3에서 구현됩니다</p>
+        <div class="nonogram" id="nonogramGrid"></div>
       </div>
 
       <aside class="panel panel--items" id="panelItems">
@@ -270,6 +287,258 @@
     }
   };
 
+  /* ================================================================
+     SAMPLE PUZZLE DATA — solution grids only. Hints are always
+     derived from `solution` (spec §4), never authored by hand.
+     0 = empty, 1 = filled. First entry is the default puzzle.
+     ================================================================ */
+  const SAMPLE_PUZZLES = [
+    {
+      id:'A', name:'초급 · 다이아몬드', size:5,
+      solution:[
+        [0,0,1,0,0],
+        [0,1,1,1,0],
+        [1,1,1,1,1],
+        [0,1,1,1,0],
+        [0,0,1,0,0]
+      ]
+    },
+    {
+      id:'B', name:'중급 · 덤벨', size:5,
+      solution:[
+        [1,0,0,0,1],
+        [1,0,0,0,1],
+        [1,1,1,1,1],
+        [1,0,0,0,1],
+        [1,0,0,0,1]
+      ]
+    },
+    {
+      id:'C', name:'상급 · 하트', size:10,
+      solution:[
+        [0,1,1,0,0,0,0,1,1,0],
+        [1,1,1,1,0,0,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1],
+        [0,1,1,1,1,1,1,1,1,0],
+        [0,0,1,1,1,1,1,1,0,0],
+        [0,0,0,1,1,1,1,0,0,0],
+        [0,0,0,0,1,1,0,0,0,0],
+        [0,0,0,0,0,0,0,0,0,0]
+      ]
+    }
+  ];
+
+  /* ================================================================
+     PUZZLE SOLVER — pure functions: line hints from a solution grid,
+     and a backtracking line-solver used to prove a puzzle's solution
+     is unique. No dependency on PuzzleManager or the DOM, so this can
+     be (and was) verified standalone under plain Node before wiring
+     it up here.
+     ================================================================ */
+  function computeLineHints(line){
+    const hints = [];
+    let run = 0;
+    for(const v of line){
+      if(v === 1){ run++; }
+      else if(run > 0){ hints.push(run); run = 0; }
+    }
+    if(run > 0) hints.push(run);
+    return hints.length ? hints : [0];
+  }
+
+  function getColumns(grid){
+    const n = grid.length;
+    const cols = [];
+    for(let c=0;c<n;c++) cols.push(grid.map(row => row[c]));
+    return cols;
+  }
+
+  // All length-`length` 0/1 arrays whose run-lengths match `hints`.
+  function generateLinePatterns(hints, length){
+    if(hints.length === 1 && hints[0] === 0) return [ new Array(length).fill(0) ];
+    const results = [];
+    const k = hints.length;
+    function place(blockIndex, pos, current){
+      if(blockIndex === k){
+        const pattern = current.slice();
+        for(let i=pos;i<length;i++) pattern[i] = 0;
+        results.push(pattern);
+        return;
+      }
+      const blockLen = hints[blockIndex];
+      let remaining = 0;
+      for(let i=blockIndex+1;i<k;i++) remaining += hints[i] + 1;
+      const maxStart = length - remaining - blockLen;
+      for(let start=pos; start<=maxStart; start++){
+        const next = current.slice();
+        for(let i=pos;i<start;i++) next[i] = 0;
+        for(let i=start;i<start+blockLen;i++) next[i] = 1;
+        let afterPos = start + blockLen;
+        if(blockIndex < k-1){ next[afterPos] = 0; afterPos += 1; }
+        place(blockIndex+1, afterPos, next);
+      }
+    }
+    place(0, 0, new Array(length).fill(0));
+    return results;
+  }
+
+  // Row-by-row backtracking, pruned by checking every column's partial
+  // fill against its own candidate patterns — stops as soon as `limit`
+  // full solutions are found so a uniqueness check never has to
+  // enumerate the whole search space.
+  function solvePuzzleGrids(rowHints, colHints, size, limit){
+    const rowPatterns = rowHints.map(h => generateLinePatterns(h, size));
+    const colPatterns = colHints.map(h => generateLinePatterns(h, size));
+    const solutions = [];
+    const grid = [];
+
+    function colPrefixFeasible(col, r){
+      for(const pattern of colPatterns[col]){
+        let ok = true;
+        for(let i=0;i<=r;i++){ if(pattern[i] !== grid[i][col]){ ok = false; break; } }
+        if(ok) return true;
+      }
+      return false;
+    }
+
+    function dfs(row){
+      if(solutions.length >= limit) return;
+      if(row === size){ solutions.push(grid.map(r => r.slice())); return; }
+      for(const pattern of rowPatterns[row]){
+        grid[row] = pattern;
+        let ok = true;
+        for(let c=0;c<size;c++){
+          if(!colPrefixFeasible(c, row)){ ok = false; break; }
+        }
+        if(ok) dfs(row+1);
+        if(solutions.length >= limit) return;
+      }
+      grid[row] = undefined;
+    }
+
+    dfs(0);
+    return solutions;
+  }
+
+  function solvePuzzle(puzzle, limit=2){
+    const rowHints = puzzle.solution.map(computeLineHints);
+    const colHints = getColumns(puzzle.solution).map(computeLineHints);
+    const solutions = solvePuzzleGrids(rowHints, colHints, puzzle.size, limit);
+    return {
+      solutionCount: solutions.length,
+      isUnique: solutions.length === 1,
+      solution: solutions[0] || null
+    };
+  }
+
+  function hasUniqueSolution(puzzle){
+    return solvePuzzle(puzzle, 2).isUnique;
+  }
+
+  // Checks structure (size/shape/0-1 cells) and that the hints derived
+  // from `solution` are internally consistent. Never fails silently —
+  // always logs the specific problems found.
+  function validatePuzzle(puzzle){
+    const errors = [];
+    const n = puzzle && puzzle.size;
+    if(!puzzle || !Array.isArray(puzzle.solution) || puzzle.solution.length !== n){
+      errors.push('solution row count must equal size (' + n + ')');
+    } else {
+      puzzle.solution.forEach((row, r) => {
+        if(!Array.isArray(row) || row.length !== n){
+          errors.push('row ' + r + ' length must equal size (' + n + ')');
+        }
+        (row || []).forEach((v, c) => {
+          if(v !== 0 && v !== 1) errors.push('cell [' + r + '][' + c + '] must be 0 or 1, got ' + v);
+        });
+      });
+    }
+    if(errors.length){
+      console.error('[validatePuzzle] "' + (puzzle && puzzle.id) + '":', errors);
+      return { valid:false, errors };
+    }
+
+    const rowHints = puzzle.solution.map(computeLineHints);
+    const colHints = getColumns(puzzle.solution).map(computeLineHints);
+    [...rowHints, ...colHints].forEach((h, i) => {
+      const isEmptyLine = h.length === 1 && h[0] === 0;
+      if(!isEmptyLine){
+        if(h.some(x => !Number.isInteger(x) || x <= 0)) errors.push('hint set ' + i + ' has a non-positive value: ' + h);
+        const need = h.reduce((a,b) => a+b, 0) + (h.length - 1);
+        if(need > n) errors.push('hint set ' + i + ' (' + h + ') cannot fit in length ' + n);
+      }
+    });
+
+    if(errors.length) console.error('[validatePuzzle] "' + puzzle.id + '":', errors);
+    return { valid: errors.length === 0, errors, rowHints, colHints };
+  }
+
+  /* ================================================================
+     PUZZLE MANAGER — puzzle data, player grid state, judging. No DOM
+     access here at all; PuzzleRenderer (further below) is the only
+     thing that reads this object to draw the screen (spec §2/§12).
+     ================================================================ */
+  const CELL = { UNKNOWN:'UNKNOWN', FILLED:'FILLED', MARKED_EMPTY:'MARKED_EMPTY' };
+
+  const PuzzleManager = {
+    puzzle: null,
+    playerGrid: null,
+    rowHints: null,
+    colHints: null,
+
+    load(puzzle){
+      const check = validatePuzzle(puzzle);
+      if(!check.valid){
+        console.error('[PuzzleManager] refused to load invalid puzzle "' + puzzle.id + '"');
+        return false;
+      }
+      if(!hasUniqueSolution(puzzle)){
+        console.error('[PuzzleManager] puzzle "' + puzzle.id + '" does not have a unique solution');
+      }
+      this.puzzle = puzzle;
+      this.rowHints = check.rowHints;
+      this.colHints = check.colHints;
+      this.resetGrid();
+      return true;
+    },
+
+    resetGrid(){
+      const n = this.puzzle.size;
+      this.playerGrid = Array.from({ length:n }, () => new Array(n).fill(CELL.UNKNOWN));
+    },
+
+    reset(){
+      this.resetGrid();
+    },
+
+    // Judgement result; `correct` is null for a plain "back to UNKNOWN"
+    // since undoing a guess isn't itself right or wrong.
+    setCell(row, col, nextState){
+      const n = this.puzzle.size;
+      if(row < 0 || row >= n || col < 0 || col >= n) return null;
+      this.playerGrid[row][col] = nextState;
+      const expected = this.puzzle.solution[row][col];
+      let correct = null;
+      if(nextState === CELL.FILLED) correct = expected === 1;
+      else if(nextState === CELL.MARKED_EMPTY) correct = expected === 0;
+      return { correct, row, col, expected, actual:nextState };
+    },
+
+    isComplete(){
+      const n = this.puzzle.size;
+      for(let r=0;r<n;r++){
+        for(let c=0;c<n;c++){
+          const shouldFill = this.puzzle.solution[r][c] === 1;
+          const isFilled = this.playerGrid[r][c] === CELL.FILLED;
+          if(shouldFill !== isFilled) return false;
+        }
+      }
+      return true;
+    }
+  };
+
   const $ = id => document.getElementById(id);
 
   /* ================================================================
@@ -294,6 +563,7 @@
   const elClearScore      = $('clearScore');
   const elClearMuscle     = $('clearMuscle');
   const elGameOverScore   = $('gameOverScore');
+  const elNonogramGrid    = $('nonogramGrid');
 
   /* ================================================================
      GAME MANAGER — top-level state machine.
@@ -379,6 +649,39 @@
   };
 
   /* ================================================================
+     PUZZLE RENDERING — reads PuzzleManager state and draws the grid.
+     Pure UI concern: no judging happens here, and nothing here
+     mutates PuzzleManager (spec §2/§6). Cells carry data-row/data-col
+     already so PHASE 4 can wire click/touch input without touching
+     this rendering code; no listeners are attached yet (spec §7).
+     ================================================================ */
+  const CELL_GLYPH = { UNKNOWN:'', FILLED:'', MARKED_EMPTY:'✕' };
+
+  const PuzzleRenderer = {
+    renderAll(){
+      const { puzzle, rowHints, colHints, playerGrid } = PuzzleManager;
+      const n = puzzle.size;
+
+      elNonogramGrid.style.gridTemplateColumns = 'auto repeat(' + n + ', 1fr)';
+      elNonogramGrid.style.gridTemplateRows = 'auto repeat(' + n + ', 1fr)';
+
+      let html = '<div class="ng-corner"></div>';
+      for(let c=0;c<n;c++){
+        html += '<div class="ng-colhint">' + colHints[c].map(h => '<span>' + h + '</span>').join('') + '</div>';
+      }
+      for(let r=0;r<n;r++){
+        html += '<div class="ng-rowhint">' + rowHints[r].join(' ') + '</div>';
+        for(let c=0;c<n;c++){
+          const state = playerGrid[r][c];
+          const cls = state === CELL.FILLED ? ' filled' : '';
+          html += '<div class="ng-cell' + cls + '" data-row="' + r + '" data-col="' + c + '">' + CELL_GLYPH[state] + '</div>';
+        }
+      }
+      elNonogramGrid.innerHTML = html;
+    }
+  };
+
+  /* ================================================================
      CUTSCENE — minimal placeholder slideshow (spec §3).
      Auto-advances, but a click/tap or SKIP jumps straight to PLAYING.
      Visual polish is deferred to PHASE 13.
@@ -434,6 +737,8 @@
     UIManager.score = 0;
     UIManager.combo = 0;
     UIManager.timeLeft = CONFIG.TIMER.INITIAL_TIME;
+    PuzzleManager.load(SAMPLE_PUZZLES[0]);
+    PuzzleRenderer.renderAll();
     GameManager.setState('PLAYING');
   }
 
@@ -446,6 +751,8 @@
     Cutscene.next();
   });
 
+  PuzzleManager.load(SAMPLE_PUZZLES[0]);
+  PuzzleRenderer.renderAll();
   renderItemPanel();
   GameManager.setState('TITLE');
   UIManager.syncAll();
@@ -465,7 +772,30 @@
     forceGameState: s => GameManager.setState(s),
     forceCharacterState: s => CharacterManager.setState(s),
     setScore: v => { UIManager.score = v; UIManager.syncAll(); },
-    restart
+    restart,
+
+    // PHASE 3 — PuzzleManager test surface
+    CELL_STATES: CELL,
+    getPuzzle: () => PuzzleManager.puzzle,
+    getHints: () => ({ rowHints: PuzzleManager.rowHints, colHints: PuzzleManager.colHints }),
+    getPlayerGrid: () => PuzzleManager.playerGrid,
+    setCell: (row, col, state) => {
+      const result = PuzzleManager.setCell(row, col, state);
+      PuzzleRenderer.renderAll();
+      return result;
+    },
+    isComplete: () => PuzzleManager.isComplete(),
+    resetPuzzle: () => { PuzzleManager.reset(); PuzzleRenderer.renderAll(); },
+    loadPuzzle: key => {
+      const puzzle = SAMPLE_PUZZLES.find(p => p.id === key) || SAMPLE_PUZZLES[key];
+      if(!puzzle) return false;
+      const ok = PuzzleManager.load(puzzle);
+      if(ok) PuzzleRenderer.renderAll();
+      return ok;
+    },
+    listPuzzles: () => SAMPLE_PUZZLES.map(p => ({ id:p.id, name:p.name, size:p.size })),
+    validatePuzzle: puzzle => validatePuzzle(puzzle || PuzzleManager.puzzle),
+    solvePuzzle: puzzle => solvePuzzle(puzzle || PuzzleManager.puzzle)
   };
 })();
 </script>
