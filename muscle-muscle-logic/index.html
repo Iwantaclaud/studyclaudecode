@@ -106,9 +106,18 @@
   .character-state{ font-family:var(--hud); font-size:clamp(6px,1.2vmin,8px); color:var(--muted); letter-spacing:.06em; }
 
   /* ---- NONOGRAM PUZZLE ---- */
+  .puzzle-area{ display:flex; flex-direction:column; align-items:center; gap:8px; width:100%; }
+  .mode-toggle{ display:flex; gap:6px; }
+  .mode-btn{
+    font-family:var(--kr); font-size:clamp(11px,2vmin,13px);
+    padding:6px 14px; background:transparent; color:var(--muted);
+    border:1px solid var(--muted); cursor:pointer;
+  }
+  .mode-btn.active{ background:var(--muscle); border-color:var(--muscle); color:var(--bg); font-weight:700; }
+
   .nonogram{
     display:grid; gap:2px; background:var(--panel-line); padding:2px;
-    width:min(100%, 340px); aspect-ratio:1; margin:auto;
+    width:min(100%, 420px); aspect-ratio:1; margin:auto;
   }
   .ng-corner{ background:var(--bg); }
   .ng-colhint, .ng-rowhint{
@@ -121,8 +130,25 @@
   .ng-cell{
     background:var(--cream); display:flex; align-items:center; justify-content:center;
     font-size:clamp(7px,1.8vmin,11px); color:var(--danger); font-weight:700; user-select:none;
+    cursor:pointer;
   }
+  .ng-cell:hover{ filter:brightness(1.08); }
   .ng-cell.filled{ background:var(--muscle); }
+
+  @keyframes ngFlashCorrect{
+    0%{ transform:scale(1); }
+    40%{ transform:scale(1.18); box-shadow:0 0 0 2px var(--success) inset; }
+    100%{ transform:scale(1); }
+  }
+  @keyframes ngFlashWrong{
+    0%, 100%{ transform:translateX(0); box-shadow:0 0 0 0 transparent inset; }
+    20%{ transform:translateX(-4px); box-shadow:0 0 0 60px var(--danger) inset; }
+    40%{ transform:translateX(4px);  box-shadow:0 0 0 60px var(--danger) inset; }
+    60%{ transform:translateX(-3px); box-shadow:0 0 0 0 transparent inset; }
+    80%{ transform:translateX(3px); }
+  }
+  .ng-cell.flash-correct{ animation:ngFlashCorrect .4s ease; position:relative; z-index:1; }
+  .ng-cell.flash-wrong{ animation:ngFlashWrong .4s ease; position:relative; z-index:1; }
 
   .item-slot{ display:flex; flex-direction:column; align-items:center; gap:4px; opacity:.55; }
   .item-icon{ font-size:clamp(20px,4vmin,26px); }
@@ -151,6 +177,7 @@
 
   @media (prefers-reduced-motion: reduce){
     .character-sprite.pop{ animation:none; }
+    .ng-cell.flash-correct, .ng-cell.flash-wrong{ animation:none; }
   }
 </style>
 </head>
@@ -202,7 +229,13 @@
       </aside>
 
       <div class="panel panel--puzzle" id="panelPuzzle">
-        <div class="nonogram" id="nonogramGrid"></div>
+        <div class="puzzle-area">
+          <div class="mode-toggle" id="modeToggle">
+            <button class="mode-btn active" id="btnModeFill" type="button">채우기</button>
+            <button class="mode-btn" id="btnModeMark" type="button">X 표시</button>
+          </div>
+          <div class="nonogram" id="nonogramGrid"></div>
+        </div>
       </div>
 
       <aside class="panel panel--items" id="panelItems">
@@ -284,6 +317,23 @@
         { figure:'🏋️', text:'저 덤벨을 잡아야 한다...' },
         { figure:'💪', text:'자, 시작해보자!' }
       ]
+    }
+  };
+
+  /* ================================================================
+     EVENT BUS — tiny pub/sub so PuzzleManager can announce results
+     without ever calling UI/CharacterManager itself (spec §6). Future
+     ComboManager/ScoreManager/etc. subscribe the same way; none of
+     them exist yet, so today's only subscriber is GameManager's
+     PUZZLE_COMPLETE -> CLEAR wiring, set up in BOOT below.
+     ================================================================ */
+  const EventBus = {
+    handlers: {},
+    on(type, fn){
+      (this.handlers[type] || (this.handlers[type] = [])).push(fn);
+    },
+    emit(type, payload){
+      (this.handlers[type] || []).forEach(fn => fn(payload));
     }
   };
 
@@ -536,6 +586,20 @@
         }
       }
       return true;
+    },
+
+    // The real gameplay entry point (PHASE 4): sets the cell like
+    // setCell(), then announces the outcome over EventBus instead of
+    // calling UI/CharacterManager directly, so Combo/Score/Character
+    // can subscribe later without PuzzleManager knowing they exist.
+    // `source` lets a future ItemManager (PHASE 10) reveal a cell
+    // through this same path without it looking like a player guess.
+    applyPlayerInput(row, col, nextState, source='PLAYER'){
+      const result = this.setCell(row, col, nextState);
+      if(!result) return null;
+      EventBus.emit('PUZZLE_CELL_RESULT', { ...result, source });
+      if(this.isComplete()) EventBus.emit('PUZZLE_COMPLETE', { puzzleId:this.puzzle.id });
+      return result;
     }
   };
 
@@ -564,6 +628,8 @@
   const elClearMuscle     = $('clearMuscle');
   const elGameOverScore   = $('gameOverScore');
   const elNonogramGrid    = $('nonogramGrid');
+  const elModeFillBtn     = $('btnModeFill');
+  const elModeMarkBtn     = $('btnModeMark');
 
   /* ================================================================
      GAME MANAGER — top-level state machine.
@@ -651,9 +717,9 @@
   /* ================================================================
      PUZZLE RENDERING — reads PuzzleManager state and draws the grid.
      Pure UI concern: no judging happens here, and nothing here
-     mutates PuzzleManager (spec §2/§6). Cells carry data-row/data-col
-     already so PHASE 4 can wire click/touch input without touching
-     this rendering code; no listeners are attached yet (spec §7).
+     mutates PuzzleManager (spec §2/§6). Cells carry data-row/data-col,
+     which is what let PHASE 4's input layer (further below) wire
+     click/touch without touching this rendering code at all.
      ================================================================ */
   const CELL_GLYPH = { UNKNOWN:'', FILLED:'', MARKED_EMPTY:'✕' };
 
@@ -678,8 +744,88 @@
         }
       }
       elNonogramGrid.innerHTML = html;
+    },
+
+    cellEl(row, col){
+      return elNonogramGrid.querySelector('.ng-cell[data-row="' + row + '"][data-col="' + col + '"]');
+    },
+
+    // Targeted single-cell update — used on every real player action so
+    // a click doesn't rebuild the whole grid (renderAll stays reserved
+    // for load/reset/puzzle-switch).
+    renderCell(row, col){
+      const el = this.cellEl(row, col);
+      if(!el) return;
+      const state = PuzzleManager.playerGrid[row][col];
+      el.className = 'ng-cell' + (state === CELL.FILLED ? ' filled' : '');
+      el.textContent = CELL_GLYPH[state];
+    },
+
+    // Brief, non-blocking correct/wrong feedback (spec §7). Re-adding
+    // the class after a forced reflow lets it replay on repeat hits,
+    // same trick as CharacterManager's `.pop` restart.
+    flashCell(row, col, correct){
+      const el = this.cellEl(row, col);
+      if(!el) return;
+      const cls = correct ? 'flash-correct' : 'flash-wrong';
+      el.classList.remove('flash-correct', 'flash-wrong');
+      void el.offsetWidth;
+      el.classList.add(cls);
     }
   };
+
+  /* ================================================================
+     PUZZLE INPUT — translates raw pointer/touch gestures into
+     PuzzleManager.applyPlayerInput() calls (spec §2). Left-click/tap
+     always uses the active InputMode (FILL/MARK) so touch devices
+     without a right-click get full parity; right-click is an extra
+     desktop-only shortcut that always marks, regardless of the
+     current mode. Blocked outright unless GameManager.inputAllowed().
+     ================================================================ */
+  const InputMode = {
+    current: 'FILL',
+    set(mode){
+      this.current = mode;
+      elModeFillBtn.classList.toggle('active', mode === 'FILL');
+      elModeMarkBtn.classList.toggle('active', mode === 'MARK');
+    }
+  };
+
+  // FILLED/MARKED_EMPTY toggle back to UNKNOWN on a repeat hit (spec
+  // §4) so correcting a guess never needs a third input mode.
+  function resolveNextState(current, mode){
+    if(mode === 'MARK') return current === CELL.MARKED_EMPTY ? CELL.UNKNOWN : CELL.MARKED_EMPTY;
+    return current === CELL.FILLED ? CELL.UNKNOWN : CELL.FILLED;
+  }
+
+  function handleCellInput(row, col, mode){
+    if(!GameManager.inputAllowed()) return null;
+    const current = PuzzleManager.playerGrid[row][col];
+    const nextState = resolveNextState(current, mode);
+    const result = PuzzleManager.applyPlayerInput(row, col, nextState);
+    if(!result) return null;
+    PuzzleRenderer.renderCell(row, col);
+    if(result.correct !== null) PuzzleRenderer.flashCell(row, col, result.correct);
+    return result;
+  }
+
+  function initPuzzleInput(){
+    elNonogramGrid.addEventListener('click', e => {
+      const cell = e.target.closest('.ng-cell');
+      if(!cell) return;
+      handleCellInput(Number(cell.dataset.row), Number(cell.dataset.col), InputMode.current);
+    });
+    // Prevented everywhere in the puzzle area, not just on a cell hit —
+    // this also covers a touch long-press's contextmenu equivalent.
+    elNonogramGrid.addEventListener('contextmenu', e => {
+      e.preventDefault();
+      const cell = e.target.closest('.ng-cell');
+      if(!cell) return;
+      handleCellInput(Number(cell.dataset.row), Number(cell.dataset.col), 'MARK');
+    });
+    elModeFillBtn.addEventListener('click', () => InputMode.set('FILL'));
+    elModeMarkBtn.addEventListener('click', () => InputMode.set('MARK'));
+  }
 
   /* ================================================================
      CUTSCENE — minimal placeholder slideshow (spec §3).
@@ -751,6 +897,14 @@
     Cutscene.next();
   });
 
+  // A completed puzzle is the only thing that should move the game to
+  // CLEAR right now — connects to the existing CLEAR screen, no new
+  // clear presentation is added this phase (spec §9).
+  EventBus.on('PUZZLE_COMPLETE', () => {
+    if(GameManager.state === 'PLAYING') GameManager.setState('CLEAR');
+  });
+
+  initPuzzleInput();
   PuzzleManager.load(SAMPLE_PUZZLES[0]);
   PuzzleRenderer.renderAll();
   renderItemPanel();
@@ -795,7 +949,24 @@
     },
     listPuzzles: () => SAMPLE_PUZZLES.map(p => ({ id:p.id, name:p.name, size:p.size })),
     validatePuzzle: puzzle => validatePuzzle(puzzle || PuzzleManager.puzzle),
-    solvePuzzle: puzzle => solvePuzzle(puzzle || PuzzleManager.puzzle)
+    solvePuzzle: puzzle => solvePuzzle(puzzle || PuzzleManager.puzzle),
+
+    // PHASE 4 — real input simulation, gated by GameManager just like
+    // a genuine click/tap would be (unlike the raw setCell above).
+    clickCell: (row, col) => handleCellInput(row, col, InputMode.current),
+    rightClickCell: (row, col) => handleCellInput(row, col, 'MARK'),
+    getCellResult: (row, col) => {
+      const p = PuzzleManager;
+      if(!p.puzzle) return null;
+      const actual = p.playerGrid[row][col];
+      const expected = p.puzzle.solution[row][col];
+      let correct = null;
+      if(actual === CELL.FILLED) correct = expected === 1;
+      else if(actual === CELL.MARKED_EMPTY) correct = expected === 0;
+      return { row, col, expected, actual, correct };
+    },
+    getInputMode: () => InputMode.current,
+    setInputMode: mode => InputMode.set(mode)
   };
 })();
 </script>
