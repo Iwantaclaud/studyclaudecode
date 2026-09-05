@@ -121,8 +121,16 @@
   .panel--items{ grid-area:items; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; }
 
   .character{ display:flex; flex-direction:column; align-items:center; gap:8px; }
-  .character-stage{ position:relative; display:flex; align-items:center; justify-content:center; }
-  .character-sprite{ font-size:clamp(34px,8vmin,54px); line-height:1; }
+  .character-stage{
+    position:relative; display:flex; align-items:center; justify-content:center;
+    width:clamp(56px,16vmin,120px); height:clamp(56px,16vmin,120px);
+  }
+  .character-stage::before{
+    content:''; position:absolute; inset:0; border-radius:50%;
+    background:radial-gradient(circle, rgba(255,122,61,.25) 0%, rgba(255,122,61,.08) 55%, transparent 76%);
+    box-shadow:inset 0 0 0 1px rgba(255,122,61,.25);
+  }
+  .character-sprite{ position:relative; z-index:1; font-size:clamp(36px,9vmin,80px); line-height:1; }
   .character-sprite.pop{ animation:pop .32s ease; }
   @keyframes pop{ 0%{ transform:scale(1); } 45%{ transform:scale(1.22); } 100%{ transform:scale(1); } }
   .character-sprite.pop.hype{ animation:popHype .22s ease; }
@@ -171,7 +179,7 @@
 
   .nonogram{
     display:grid; gap:2px; background:var(--panel-line); padding:2px;
-    width:min(100%, 420px); aspect-ratio:1; margin:auto;
+    width:min(100%, 480px); aspect-ratio:1; margin:auto;
   }
   .ng-corner{ background:var(--bg); }
   .ng-colhint, .ng-rowhint{
@@ -206,12 +214,12 @@
 
   .item-slot{
     display:flex; flex-direction:column; align-items:center; gap:4px;
-    background:transparent; border:1px solid transparent; border-radius:4px;
-    padding:4px; font-family:inherit; cursor:pointer;
+    background:rgba(255,122,61,.06); border:1px solid var(--panel-line); border-radius:8px;
+    padding:6px 8px; font-family:inherit; cursor:pointer;
   }
   .item-slot:disabled{ opacity:.35; cursor:not-allowed; }
-  .item-slot.selected{ border-color:var(--muscle); background:rgba(255,122,61,.15); }
-  .item-icon{ font-size:clamp(20px,4vmin,26px); }
+  .item-slot.selected{ border-color:var(--muscle); background:rgba(255,122,61,.18); }
+  .item-icon{ font-size:clamp(22px,4.4vmin,30px); }
   .item-count{ font-family:var(--hud); font-size:clamp(9px,1.6vmin,12px); }
 
   .item-target-banner{
@@ -228,6 +236,16 @@
   .screen--clear h2{ color:var(--success); text-shadow:0 0 18px rgba(74,222,95,.6); }
   .screen--gameover h2{ color:var(--danger); text-shadow:0 0 18px rgba(255,77,94,.6); }
   .character-sprite.big{ font-size:clamp(56px,14vmin,92px); }
+  .clear-character{ position:relative; display:inline-flex; }
+  .clear-badge{
+    position:absolute; right:-6px; bottom:-2px;
+    width:1.7em; height:1.7em; font-size:clamp(18px,4.2vmin,28px);
+    display:flex; align-items:center; justify-content:center;
+    background:var(--panel); border:2px solid var(--muscle); border-radius:50%;
+    box-shadow:0 2px 8px rgba(0,0,0,.45);
+  }
+  .clear-badge[hidden]{ display:none; }
+  .clear-badge.pop{ animation:pop .32s ease; }
   .result-line{ font-family:var(--hud); font-size:clamp(11px,2.2vmin,15px); color:var(--cream); }
   .result-detail{ font-family:var(--hud); font-size:clamp(9px,1.7vmin,12px); color:var(--muted); margin:0; }
   .result-sub{ color:var(--muted); font-size:clamp(11px,2vmin,14px); }
@@ -251,7 +269,7 @@
 
   @media (prefers-reduced-motion: reduce){
     .character-sprite.pop, .character-sprite.pop.hype, .character-sprite.game-over-fall,
-    .character-sprite.mistake-shake, .dumbbell-drop.falling{ animation:none; }
+    .character-sprite.mistake-shake, .dumbbell-drop.falling, .clear-badge.pop{ animation:none; }
     .ng-cell.flash-correct, .ng-cell.flash-wrong{ animation:none; }
     .hud-value.critical{ animation:none; }
     .hud-value.combo-pop{ animation:none; }
@@ -343,7 +361,10 @@
   <!-- ============================ CLEAR ============================ -->
   <section class="screen screen--clear" id="screenClear" hidden>
     <h2>CLEAR!</h2>
-    <div class="character-sprite big" id="clearSprite">😆</div>
+    <div class="clear-character">
+      <div class="character-sprite big" id="clearSprite">😆</div>
+      <div class="clear-badge" id="clearBadge" hidden></div>
+    </div>
     <p class="result-line" id="clearScore">SCORE 0</p>
     <p class="result-detail" id="clearMaxCombo">MAX COMBO 0</p>
     <p class="result-detail" id="clearTimeBonus">TIME BONUS +0</p>
@@ -630,8 +651,69 @@
         [0,0,0,0,1,1,0,0,0,0],
         [0,0,0,0,0,0,0,0,0,0]
       ]
+    },
+    {
+      id:'E', name:'초급 · 화살표', size:5, exercise:'SQUAT',
+      solution:[
+        [0,0,1,0,0],
+        [0,1,1,1,0],
+        [1,1,1,1,1],
+        [0,0,1,0,0],
+        [0,0,1,0,0]
+      ]
+    },
+    {
+      id:'D', name:'중급 · 별', size:7, exercise:'BICEP_CURL',
+      solution:[
+        [0,0,0,1,0,0,0],
+        [0,0,1,1,1,0,0],
+        [0,0,0,1,0,0,0],
+        [1,1,1,1,1,1,1],
+        [0,0,0,1,0,0,0],
+        [0,0,1,1,1,0,0],
+        [0,0,0,1,0,0,0]
+      ]
+    },
+    {
+      id:'F', name:'중급 · 스마일', size:7, exercise:'OVERHEAD_PRESS',
+      solution:[
+        [0,1,1,1,1,1,0],
+        [1,0,0,0,0,0,1],
+        [1,0,1,0,1,0,1],
+        [1,0,0,0,0,0,1],
+        [1,1,0,0,0,1,1],
+        [1,0,1,1,1,0,1],
+        [0,1,1,1,1,1,0]
+      ]
+    },
+    {
+      id:'G', name:'상급 · 트로피', size:8, exercise:'SQUAT',
+      solution:[
+        [1,1,0,0,0,0,1,1],
+        [1,1,1,1,1,1,1,1],
+        [0,1,1,1,1,1,1,0],
+        [0,0,1,1,1,1,0,0],
+        [0,0,0,1,1,0,0,0],
+        [0,0,0,1,1,0,0,0],
+        [0,0,1,1,1,1,0,0],
+        [0,1,1,1,1,1,1,0]
+      ]
     }
   ];
+
+  // Replay variety: RESTART picks a random puzzle instead of always the
+  // same one, but never repeats the puzzle that was just played back to
+  // back. Plain in-memory rotation only — no save/persistence/network.
+  const PuzzleRotation = {
+    lastId: null,
+    pick(){
+      const choices = SAMPLE_PUZZLES.filter(p => p.id !== this.lastId);
+      const pool = choices.length ? choices : SAMPLE_PUZZLES;
+      const puzzle = pool[Math.floor(Math.random() * pool.length)];
+      this.lastId = puzzle.id;
+      return puzzle;
+    }
+  };
 
   /* ================================================================
      PUZZLE SOLVER — pure functions: line hints from a solution grid,
@@ -986,6 +1068,7 @@
   const elCharacterState  = $('characterState');
   const elDumbbellDrop    = $('dumbbellDrop');
   const elClearSprite     = $('clearSprite');
+  const elClearBadge      = $('clearBadge');
   const elGameOverSprite  = $('gameOverSprite');
   const elClearScore      = $('clearScore');
   const elClearMaxCombo   = $('clearMaxCombo');
@@ -1028,11 +1111,13 @@
         ScoreManager.applyTimeBonus(TimerManager.getTimeLeft()); // §2-4: once, here only — never on GAME_OVER
         ItemManager.cancel(); // §10 5-13: any pending item selection is cancelled immediately
         UIManager.syncClearResult();
+        SoundManager.playClear();
       }
       if(next === 'GAME_OVER'){
         CharacterManager.setState('GAME_OVER');
         TimerManager.stop();
         ItemManager.cancel();
+        SoundManager.playGameOver();
       }
 
       UIManager.syncAll();
@@ -1059,14 +1144,6 @@
     BICEP_CURL:     { label:'이두컬',          icon:'💪',  hypeIcon:'💪🔥' },
     SQUAT:          { label:'스쿼트',          icon:'🦵',  hypeIcon:'🦵🔥' },
     OVERHEAD_PRESS: { label:'오버헤드 프레스', icon:'🏋️', hypeIcon:'🏋️🔥' }
-  };
-
-  // CLEAR poses by last-used exercise (spec PHASE 11 §1-2): bicep-focused,
-  // lower-body-focused, shoulder-focused.
-  const CLEAR_POSES = {
-    BICEP_CURL: '💪😆',
-    SQUAT: '🦵😆',
-    OVERHEAD_PRESS: '🙌😆'
   };
 
   const CharacterManager = {
@@ -1112,9 +1189,19 @@
       } else if(next === 'CLEAR'){
         elCharacterSprite.classList.add('pop');
         // Same reasoning as GAME_OVER above — pose on the visible
-        // #clearSprite, not the hidden PLAYING-screen sprite.
-        elClearSprite.textContent = (ex && CLEAR_POSES[this.exercise]) || CHARACTER_SPRITES.CLEAR;
+        // #clearSprite, not the hidden PLAYING-screen sprite. The face
+        // always smiles; the last-worked body part shows as a small
+        // badge instead of being concatenated into one big glyph, so it
+        // reads as "one character" rather than two unrelated emoji.
+        elClearSprite.textContent = CHARACTER_SPRITES.CLEAR;
         this.replay(elClearSprite, 'pop');
+        if(ex){
+          elClearBadge.textContent = ex.icon;
+          elClearBadge.hidden = false;
+          this.replay(elClearBadge, 'pop');
+        } else {
+          elClearBadge.hidden = true;
+        }
       } else {
         elCharacterSprite.classList.add('pop');
         if(next === 'EXERCISE_HYPE') elCharacterSprite.classList.add('hype');
@@ -1178,6 +1265,79 @@
       this.returnTimer = setTimeout(() => {
         if(CharacterManager.state === 'MISTAKE') CharacterManager.setState('IDLE');
       }, CONFIG.MISTAKE.DURATION_MS);
+    }
+  };
+
+  /* ================================================================
+     SOUND MANAGER — very small WebAudio beeps, generated on the fly
+     (no audio files, no sample loading). One oscillator+gain per note,
+     scheduled relative to AudioContext.currentTime. The context is
+     created lazily on the first real user gesture (a click) so it
+     starts in the browser's allowed "running" state instead of being
+     silently blocked by autoplay policy.
+     ================================================================ */
+  const SoundManager = {
+    ctx: null,
+
+    ensureContext(){
+      if(!this.ctx){
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if(!AC) return null;
+        this.ctx = new AC();
+      }
+      if(this.ctx.state === 'suspended') this.ctx.resume();
+      return this.ctx;
+    },
+
+    // One beep: linear attack, exponential decay, optional pitch slide.
+    note(freq, duration, { type='square', volume=0.15, delay=0, slideTo=null } = {}){
+      const ctx = this.ensureContext();
+      if(!ctx) return;
+      const t0 = ctx.currentTime + delay;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, t0);
+      if(slideTo) osc.frequency.linearRampToValueAtTime(slideTo, t0 + duration);
+      gain.gain.setValueAtTime(0, t0);
+      gain.gain.linearRampToValueAtTime(volume, t0 + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t0);
+      osc.stop(t0 + duration + 0.03);
+    },
+
+    // Base success beep, plus a second higher layer once a combo is
+    // actually building (spec: correct AND combo each get a sound, but
+    // they always happen on the same input, so combo is a second layer
+    // rather than a competing sound). Pitch climbs a little further
+    // once HYPE kicks in so a long streak keeps feeling more alive.
+    playCorrect(combo, hype){
+      this.note(660, 0.11, { type:'sine', volume:0.16 });
+      if(combo >= 2){
+        const freq = Math.min(660 + combo * 45, hype ? 1600 : 1300);
+        this.note(freq, 0.09, { type:'triangle', volume:0.13, delay:0.05 });
+      }
+    },
+
+    playWrong(){
+      this.note(180, 0.22, { type:'sawtooth', volume:0.14, slideTo:90 });
+    },
+
+    playItemUse(){
+      this.note(420, 0.09, { type:'triangle', volume:0.12 });
+    },
+
+    playClear(){
+      [523, 659, 784, 1047].forEach((freq, i) => {
+        this.note(freq, 0.16, { type:'square', volume:0.13, delay:i * 0.1 });
+      });
+    },
+
+    playGameOver(){
+      [392, 330, 262].forEach((freq, i) => {
+        this.note(freq, 0.28, { type:'sawtooth', volume:0.12, delay:i * 0.18 });
+      });
     }
   };
 
@@ -1258,6 +1418,14 @@
      ================================================================ */
   const CELL_GLYPH = { UNKNOWN:'', FILLED:'', MARKED_EMPTY:'✕' };
 
+  // An empty line's hint is the [0] sentinel (spec §4's computeLineHints
+  // contract, still needed by the solver) — but showing a literal "0" to
+  // the player reads like a real block of length zero. Standard nonogram
+  // convention is to just show nothing for a fully-empty row/column.
+  function formatHintLine(hints){
+    return (hints.length === 1 && hints[0] === 0) ? '' : hints.join(' ');
+  }
+
   const PuzzleRenderer = {
     // A revealed cell (spec §10 5-8) shows the real answer regardless
     // of playerGrid, with a distinct ring so it reads as "the game
@@ -1286,10 +1454,11 @@
 
       let html = '<div class="ng-corner"></div>';
       for(let c=0;c<n;c++){
-        html += '<div class="ng-colhint">' + colHints[c].map(h => '<span>' + h + '</span>').join('') + '</div>';
+        const colHint = formatHintLine(colHints[c]);
+        html += '<div class="ng-colhint">' + (colHint ? colHint.split(' ').map(h => '<span>' + h + '</span>').join('') : '') + '</div>';
       }
       for(let r=0;r<n;r++){
-        html += '<div class="ng-rowhint">' + rowHints[r].join(' ') + '</div>';
+        html += '<div class="ng-rowhint">' + formatHintLine(rowHints[r]) + '</div>';
         for(let c=0;c<n;c++){
           html += '<div class="' + this.cellClass(r,c) + '" data-row="' + r + '" data-col="' + c + '">' + this.cellGlyph(r,c) + '</div>';
         }
@@ -1467,12 +1636,15 @@
     ComboManager.reset();
     ScoreManager.reset();
     ItemManager.reset();
-    PuzzleManager.load(SAMPLE_PUZZLES[0]);
+    PuzzleManager.load(PuzzleRotation.pick());
     PuzzleRenderer.renderAll();
     GameManager.setState('PLAYING'); // starts the timer fresh via GameManager.setState
   }
 
-  $('btnStart').addEventListener('click', () => GameManager.setState('CUTSCENE'));
+  $('btnStart').addEventListener('click', () => {
+    SoundManager.ensureContext(); // first guaranteed user gesture — unblocks autoplay policy before any sound is needed
+    GameManager.setState('CUTSCENE');
+  });
   $('btnSkipCutscene').addEventListener('click', () => Cutscene.skip());
   $('btnClearRestart').addEventListener('click', restart);
   $('btnGameOverRestart').addEventListener('click', restart);
@@ -1536,6 +1708,14 @@
     if(result.correct === false) MistakeManager.trigger();
   });
 
+  // Sound layer — registered after ComboManager's own handler so
+  // getCurrent() already reflects this same answer's post-add() combo,
+  // same ordering trick ScoreManager/ExerciseManager rely on above.
+  EventBus.on('PUZZLE_CELL_RESULT', result => {
+    if(result.correct === true) SoundManager.playCorrect(ComboManager.getCurrent(), ComboManager.getCurrent() >= CONFIG.COMBO.HYPE_THRESHOLD);
+    else if(result.correct === false) SoundManager.playWrong();
+  });
+
   EventBus.on('TIME_UPDATED', ({ timeLeft }) => UIManager.syncTime(timeLeft));
   EventBus.on('COMBO_CHANGED', ({ currentCombo }) => UIManager.syncCombo(currentCombo));
   EventBus.on('SCORE_CHANGED', ({ score, delta }) => UIManager.syncScore(score, delta));
@@ -1545,12 +1725,14 @@
   // penalty is the only game-state effect an item use has (spec §10
   // 5-10), applied exactly once per successful use.
   EventBus.on('ITEM_USED', () => ScoreManager.applyItemPenalty());
+  EventBus.on('ITEM_USED', () => SoundManager.playItemUse());
   EventBus.on('ITEM_COUNT_CHANGED', renderItemPanel);
   EventBus.on('ITEM_SELECTED', renderItemPanel);
   EventBus.on('ITEM_CANCELLED', renderItemPanel);
 
   initPuzzleInput();
-  PuzzleManager.load(SAMPLE_PUZZLES[0]);
+  PuzzleManager.load(SAMPLE_PUZZLES[0]); // first-ever puzzle stays fixed (matches the cutscene intro); RESTART rotates from here
+  PuzzleRotation.lastId = SAMPLE_PUZZLES[0].id;
   PuzzleRenderer.renderAll();
   ItemManager.reset();
   renderItemPanel();
@@ -1659,7 +1841,18 @@
 
     // PHASE 12 — MuscleManager test surface
     getMuscleLevel: () => MuscleManager.getCurrentMuscleData(),
-    getMuscleLevelForScore: score => MuscleManager.getLevelForScore(score)
+    getMuscleLevelForScore: score => MuscleManager.getLevelForScore(score),
+
+    // FINAL POLISH — SoundManager test surface (headless tests can't hear
+    // anything, but this confirms the WebAudio calls run without throwing
+    // and that the context actually reaches "running" after a gesture).
+    getSoundContextState: () => (SoundManager.ctx ? SoundManager.ctx.state : null),
+    playSound: name => {
+      const fn = { correct:() => SoundManager.playCorrect(ComboManager.getCurrent(), false), wrong:() => SoundManager.playWrong(), item:() => SoundManager.playItemUse(), clear:() => SoundManager.playClear(), gameover:() => SoundManager.playGameOver() }[name];
+      if(!fn) return false;
+      fn();
+      return true;
+    }
   };
 })();
 </script>
